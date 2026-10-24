@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   publish-images:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
