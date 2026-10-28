@@ -29,6 +29,8 @@ linters:
     - interfacebloat
     - noinlineerr
     - revive
+    - wsl
+    - gomodguard
   settings:
     cyclop:
       max-complexity: 27
@@ -47,6 +49,10 @@ linters:
       skip-single-param: true
     nakedret:
       max-func-lines: 50
+    wsl_v5:
+      allow-first-in-block: true
+      allow-whole-block: false
+      branch-max-lines: 2
   exclusions:
     generated: lax
     presets:

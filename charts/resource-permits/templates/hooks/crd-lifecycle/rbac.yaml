@@ -22,6 +22,7 @@ rules:
   - resourcepermittemplates.addons.projectcapsule.dev
   - globalresourcepermittemplates.addons.projectcapsule.dev
   verbs:
+  - create
   - get
   - patch
   - update

@@ -15,3 +15,6 @@ maintainers:
     email: cncf-capsule-maintainers@lists.cncf.io
 annotations:
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |-
+    - kind: fixed
+      description: crd hook job is allowed to create crds
