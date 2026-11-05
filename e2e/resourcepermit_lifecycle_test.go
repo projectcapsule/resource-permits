@@ -611,7 +611,10 @@ var _ = Describe(
 					Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseActive))
 					Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: request.Namespace, Name: "e2e-resourcepermit-delete-active-admin-target"}, &corev1.ConfigMap{})).To(Succeed())
 				}
-				patchLifecyclePhase(ctx, reviewerClient, request, permitsv1beta2.ResourcePermitPhaseExpired)
+				// The request is Active here, so it must be expired from that
+				// phase instead of the Requested transition patchLifecyclePhase
+				// asserts.
+				expireActiveResourcePermit(ctx, request)
 
 				Eventually(func() bool {
 					current := &permitsv1beta2.ResourcePermit{}
@@ -867,6 +870,8 @@ func expectResourcePermitEvent(
 	}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
 }
 
+// patchLifecyclePhase transitions a request out of its initial Requested
+// phase. Use expireActiveResourcePermit for an already activated request.
 func patchLifecyclePhase(
 	ctx context.Context,
 	actor client.Client,

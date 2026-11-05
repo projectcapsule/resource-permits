@@ -135,29 +135,44 @@ func exerciseMixedProtection(global bool, tenantName, baseNamespace, targetNames
 	setProtection(true, false)
 	cm := &corev1.ConfigMap{}
 	assertPermitProtected := func() {
-		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(seed), cm)).To(Succeed())
-		Expect(cm.Labels).To(HaveKeyWithValue(permitmeta.ResourcePermitProtectionLabel, meta.ValueTrue))
-		Expect(cm.Annotations).To(HaveKeyWithValue(permitmeta.ResourcePermitServiceAccountAnnotation, serviceAccountUsername(sa.Namespace.String(), sa.Name.String())))
-		before := cm.DeepCopy()
-		denial := Or(ContainSubstring("protected by a ResourcePermit"))
-		if cm.Labels[meta.ReplicationProtectionLabel] == meta.ValueTrue {
-			// Independent validating webhooks have no guaranteed response order.
-			denial = Or(denial, ContainSubstring("capsule replication "+parent.GetName()))
-		}
-		Expect(actor.Patch(ctx, cm, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":null,"annotations":null}}`)))).To(MatchError(denial))
-		Expect(actor.Delete(ctx, cm, client.DryRunAll)).To(MatchError(denial))
-		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(seed), cm)).To(Succeed())
-		Expect(cm.Labels).To(Equal(before.Labels))
-		Expect(cm.Annotations).To(Equal(before.Annotations))
-		Expect(cm.Data).To(Equal(before.Data))
-		Expect(cm.DeletionTimestamp.IsZero()).To(BeTrue())
+		// Both controllers label the shared target asynchronously, so the
+		// expected denial depends on a state which is only eventually read.
+		Eventually(func(g Gomega) {
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(seed), cm)).To(Succeed())
+			g.Expect(cm.Labels).To(HaveKeyWithValue(permitmeta.ResourcePermitProtectionLabel, meta.ValueTrue))
+			g.Expect(cm.Annotations).To(HaveKeyWithValue(permitmeta.ResourcePermitServiceAccountAnnotation, serviceAccountUsername(sa.Namespace.String(), sa.Name.String())))
+			before := cm.DeepCopy()
+			denial := Or(ContainSubstring("protected by a ResourcePermit"))
+			if cm.Labels[meta.ReplicationProtectionLabel] == meta.ValueTrue {
+				// Independent validating webhooks have no guaranteed response
+				// order, and the replication webhook words its denial
+				// differently while its parent is cordoned or deleted.
+				denial = Or(denial,
+					ContainSubstring("capsule replication "+parent.GetName()),
+					ContainSubstring("managing parent is not yet available"),
+				)
+			}
+			g.Expect(actor.Patch(ctx, cm, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":null,"annotations":null}}`)))).To(MatchError(denial))
+			g.Expect(actor.Delete(ctx, cm, client.DryRunAll)).To(MatchError(denial))
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(seed), cm)).To(Succeed())
+			g.Expect(cm.Labels).To(Equal(before.Labels))
+			g.Expect(cm.Annotations).To(Equal(before.Annotations))
+			g.Expect(cm.Data).To(Equal(before.Data))
+			g.Expect(cm.DeletionTimestamp.IsZero()).To(BeTrue())
+		}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
 	}
-	Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(seed), cm)).To(Succeed())
-	Expect(cm.Labels).To(HaveKeyWithValue(meta.ProtectedByCapsuleLabel, permitmeta.ValueControllerResourcePermit))
-	Expect(cm.Labels).To(HaveKeyWithValue(meta.ReplicationProtectionLabel, meta.ValueTrue))
+	Eventually(func(g Gomega) {
+		g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(seed), cm)).To(Succeed())
+		g.Expect(cm.Labels).To(HaveKeyWithValue(meta.ProtectedByCapsuleLabel, permitmeta.ValueControllerResourcePermit))
+		g.Expect(cm.Labels).To(HaveKeyWithValue(meta.ReplicationProtectionLabel, meta.ValueTrue))
+	}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
 	setProtection(false, false)
+	// Replication protection is removed by a later reconcile of the parent.
+	Eventually(func(g Gomega) {
+		g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(seed), cm)).To(Succeed())
+		g.Expect(cm.Labels).NotTo(HaveKey(meta.ReplicationProtectionLabel))
+	}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
 	assertPermitProtected()
-	Expect(cm.Labels).NotTo(HaveKey(meta.ReplicationProtectionLabel))
 	setProtection(true, false)
 	By("preserving both controllers' protection when replication ownership cannot be resolved")
 	setProtection(true, true)
@@ -170,9 +185,12 @@ func exerciseMixedProtection(global bool, tenantName, baseNamespace, targetNames
 		g.Expect(permit.Status.ProcessedItems[0].Status).To(Equal(metav1.ConditionFalse))
 		g.Expect(permit.Status.ProcessedItems[0].Message).To(ContainSubstring("replication owner resolver is not configured"))
 	}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
+	Eventually(func(g Gomega) {
+		g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(seed), cm)).To(Succeed())
+		g.Expect(cm.Data).To(Equal(map[string]string{"shared": "managed", "external": "retained"}))
+		g.Expect(cm.Labels).To(HaveKeyWithValue(meta.ReplicationProtectionLabel, meta.ValueTrue))
+	}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
 	assertPermitProtected()
-	Expect(cm.Data).To(Equal(map[string]string{"shared": "managed", "external": "retained"}))
-	Expect(cm.Labels).To(HaveKeyWithValue(meta.ReplicationProtectionLabel, meta.ValueTrue))
 
 	By("orphaning the replication without clearing surviving permit protection")
 	Expect(k8sClient.Delete(ctx, parent)).To(Succeed())

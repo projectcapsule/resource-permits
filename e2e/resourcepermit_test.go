@@ -45,6 +45,13 @@ var _ = Describe("creating a GlobalResourcePermitTemplate", Ordered, Label("reso
 		namespace       *corev1.Namespace
 		brt             *permitsv1beta2.GlobalResourcePermitTemplate
 		defaultDuration = 5 * time.Second
+		// Specs which assert on the managed target while the permit is still
+		// active must outlive the poll interval under parallel load. They expire
+		// the permit explicitly instead of racing its natural expiry.
+		protectedDuration = 2 * time.Minute
+		// Archive retention must be long enough to observe the archived denial
+		// and short enough for the final deletion to fit the spec timeout.
+		archiveRetention = 30 * time.Second
 	)
 
 	BeforeEach(func() {
@@ -93,7 +100,14 @@ var _ = Describe("creating a GlobalResourcePermitTemplate", Ordered, Label("reso
 		It("reconciles unrestricted namespace availability into status", func() {
 			expectGlobalResourcePermitTemplateNamespaces(ctx, brt.Name, "*")
 		})
-		It("should create a ConfigMap and delete it after timeout", func() {
+	})
+
+	Describe("Protected target of an active ResourcePermit", func() {
+		BeforeEach(func() {
+			brt.Spec.DefaultDuration = &metav1.Duration{Duration: protectedDuration}
+		})
+
+		It("should create a protected ConfigMap and delete it once expired", func() {
 			br := &permitsv1beta2.ResourcePermit{
 				Name:      "e2e-resourcepermit-br",
 				Namespace: namespace.Name,
@@ -118,11 +132,11 @@ var _ = Describe("creating a GlobalResourcePermitTemplate", Ordered, Label("reso
 				g.Expect(current.Status.Request.Template.Name).To(Equal(brt.Name))
 				g.Expect(current.Status.Request.Template.ResourceVersion).NotTo(BeEmpty())
 				g.Expect(current.Status.Request.Duration).NotTo(BeNil())
-				g.Expect(current.Status.Request.Duration.Duration).To(Equal(defaultDuration))
+				g.Expect(current.Status.Request.Duration.Duration).To(Equal(protectedDuration))
 				g.Expect(current.Status.Active).NotTo(BeNil())
 				g.Expect(current.Status.Active.ActiveFrom).NotTo(BeNil())
 				g.Expect(current.Status.Active.ActiveUntil).NotTo(BeNil())
-				g.Expect(current.Status.Active.ActiveUntil.Sub(current.Status.Active.ActiveFrom.Time)).To(Equal(defaultDuration))
+				g.Expect(current.Status.Active.ActiveUntil.Sub(current.Status.Active.ActiveFrom.Time)).To(Equal(protectedDuration))
 
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "e2e-resourcepermit-cm", Namespace: br.Namespace}, cm)).To(Succeed())
 				g.Expect(cm.Labels).To(HaveKeyWithValue(apimeta.CreatedByCapsuleLabel, permitmeta.ValueControllerResourcePermit))
@@ -142,15 +156,18 @@ var _ = Describe("creating a GlobalResourcePermitTemplate", Ordered, Label("reso
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)).To(Succeed())
 			Expect(cm.Data).To(HaveKeyWithValue("key", "value"))
 
-			By("waiting for natural expiry to delete both the ConfigMap and its ResourcePermit")
+			By("expiring the permit to delete both the ConfigMap and its ResourcePermit")
+			expireActiveResourcePermit(ctx, br)
 			expectResourcePermitAndConfigMapDeleted(ctx, br, cm)
 		})
 	})
 
 	Describe("Deletion lifecycle", func() {
 		BeforeEach(func() {
-			brt.Spec.DefaultDuration = &metav1.Duration{Duration: 4 * time.Second}
-			keepFor := resourcepermit.ExtendedDuration(6 * time.Second)
+			// The permit must outlive the poll interval so the active-phase
+			// denial is observable; expiry is then driven explicitly.
+			brt.Spec.DefaultDuration = &metav1.Duration{Duration: protectedDuration}
+			keepFor := resourcepermit.ExtendedDuration(archiveRetention)
 			brt.Spec.KeepFor = &keepFor
 		})
 
@@ -172,6 +189,8 @@ var _ = Describe("creating a GlobalResourcePermitTemplate", Ordered, Label("reso
 
 			err := k8sClient.Delete(ctx, current)
 			Expect(err).To(MatchError(ContainSubstring("cannot be deleted before it has expired")))
+
+			expireActiveResourcePermit(ctx, br)
 
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: br.Name, Namespace: br.Namespace}, current)).To(Succeed())
