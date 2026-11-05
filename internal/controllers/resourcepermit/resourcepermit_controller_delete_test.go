@@ -220,7 +220,7 @@ func TestResourcePermitCleanupPreservesUnresolvedReplicationOwnership(t *testing
 					permit.DeletionTimestamp = &now
 					namespace.Status.Phase = corev1.NamespaceTerminating
 				}
-				target := &unstructured.Unstructured{Object: map[string]interface{}{"apiVersion": "v1", "kind": "ConfigMap", "data": map[string]interface{}{"external": "preserve"}}}
+				target := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "data": map[string]any{"external": "preserve"}}}
 				target.SetName("shared")
 				target.SetNamespace(namespace.Name)
 				target.SetUID("shared-uid")

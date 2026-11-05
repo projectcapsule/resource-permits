@@ -1092,7 +1092,7 @@ func TestDeleteLifecycleAppliesToEveryIdentity(t *testing.T) {
 				decoder := &test.Decoder[*permitsv1beta2.ResourcePermit]{OldObject: &permitsv1beta2.ResourcePermit{
 					Namespace: "team-a", Status: permitsv1beta2.ResourcePermitStatus{Phase: tt.phase, KeepUntil: tt.keepUntil},
 				}}
-				req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Namespace: "team-a", UserInfo: identity}}
+				req := admission.Request{Namespace: "team-a", UserInfo: identity}
 				resp := ResourcePermitValidationHandler(ctrl.Log).OnDelete(nil, reader, decoder, nil)(t.Context(), req)
 				if tt.expected == 0 {
 					require.Nil(t, resp)

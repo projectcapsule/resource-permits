@@ -32,7 +32,7 @@ func createResourcePermitTenantNamespace(ctx context.Context) *corev1.Namespace 
 	tenant := &capsulev1beta2.Tenant{
 		Name: name, Labels: map[string]string{"env": "e2e"},
 		Spec: capsulev1beta2.TenantSpec{Owners: rbac.OwnerListSpec{{
-			UserSpec: rbac.UserSpec{Name: name + "-owner", Kind: rbac.UserOwner},
+			Name: name + "-owner", Kind: rbac.UserOwner,
 		}}},
 	}
 	Expect(k8sClient.Create(ctx, tenant)).To(Succeed())

@@ -33,11 +33,11 @@ var _ = Describe("Standalone template execution identity schema", Serial, Label(
 func verifyTemplateIdentitySchema(namespace string) {
 	ctx := context.Background()
 	for _, kind := range []string{"ResourcePermitTemplate", "GlobalResourcePermitTemplate"} {
-		template := &unstructured.Unstructured{Object: map[string]interface{}{
+		template := &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": permitsv1beta2.GroupVersion.String(), "kind": kind,
-			"metadata": map[string]interface{}{"name": namespace + "-identity"},
-			"spec": map[string]interface{}{
-				"resources": []interface{}{map[string]interface{}{"template": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: example\n"}},
+			"metadata": map[string]any{"name": namespace + "-identity"},
+			"spec": map[string]any{
+				"resources": []any{map[string]any{"template": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: example\n"}},
 			},
 		}}
 		if kind == "ResourcePermitTemplate" {
@@ -50,7 +50,7 @@ func verifyTemplateIdentitySchema(namespace string) {
 		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(template), template))).To(BeTrue())
 
 		By("accepting " + kind + " with an explicit executor")
-		identity := map[string]interface{}{"name": "default"}
+		identity := map[string]any{"name": "default"}
 		if kind == "GlobalResourcePermitTemplate" {
 			identity["namespace"] = namespace
 		}

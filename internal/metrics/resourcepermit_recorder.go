@@ -29,7 +29,7 @@ func NewResourcePermitsRecorder() *ResourcePermitsRecorder {
 				Name:      "resourcepermit_phase",
 				Help:      "The current phase of the ResourcePermit.",
 			},
-			[]string{"name", "target_namespace", "status"},
+			[]string{"name", "target_namespace", "template", "template_type", "requestor", "status"},
 		),
 	}
 }
@@ -41,31 +41,51 @@ func (r *ResourcePermitsRecorder) Collectors() []prometheus.Collector {
 }
 
 // RecordResourcePermitPhase records the current phase of the ResourcePermit.
-func (r *ResourcePermitsRecorder) RecordResourcePermitPhase(br *permitsv1beta2.ResourcePermit) {
-	if r == nil || r.phaseGauge == nil || br == nil {
+func (r *ResourcePermitsRecorder) RecordResourcePermitPhase(rp *permitsv1beta2.ResourcePermit) {
+	if r == nil || r.phaseGauge == nil || rp == nil {
 		return
 	}
+
+	tmplType := templateType(rp)
+
 	// Remove previous status series for this request.
 	r.phaseGauge.DeletePartialMatch(map[string]string{
-		"name":             br.GetName(),
-		"target_namespace": br.GetNamespace(),
+		"name":             rp.GetName(),
+		"target_namespace": rp.GetNamespace(),
+		"template":         rp.Spec.Template.Name,
+		"template_type":    tmplType,
+		"requestor":        rp.Spec.Requestor.Name,
 	})
 
-	if br.Status.Phase == "" {
+	if rp.Status.Phase == "" {
 		return
 	}
 
-	r.phaseGauge.WithLabelValues(br.GetName(), br.GetNamespace(), string(br.Status.Phase)).Set(1)
+	r.phaseGauge.WithLabelValues(rp.GetName(), rp.GetNamespace(), rp.Spec.Template.Name, tmplType, rp.Spec.Requestor.Name, string(rp.Status.Phase)).Set(1)
 }
 
 // DeleteResourcePermitMetrics deletes all metrics series for the given ResourcePermit.
-func (r *ResourcePermitsRecorder) DeleteResourcePermitMetrics(br *permitsv1beta2.ResourcePermit) {
-	if r == nil || r.phaseGauge == nil || br == nil {
+func (r *ResourcePermitsRecorder) DeleteResourcePermitMetrics(rp *permitsv1beta2.ResourcePermit) {
+	if r == nil || r.phaseGauge == nil || rp == nil {
 		return
 	}
 
 	r.phaseGauge.DeletePartialMatch(map[string]string{
-		"name":             br.GetName(),
-		"target_namespace": br.GetNamespace(),
+		"name":             rp.GetName(),
+		"target_namespace": rp.GetNamespace(),
+		"template":         rp.Spec.Template.Name,
+		"template_type":    templateType(rp),
+		"requestor":        rp.Spec.Requestor.Name,
 	})
+}
+
+func templateType(rp *permitsv1beta2.ResourcePermit) string {
+	switch rp.Spec.Template.Kind {
+	case "GlobalResourcePermitTemplate":
+		return "global"
+	case "ResourcePermitTemplate":
+		return "namespaced"
+	}
+
+	return ""
 }

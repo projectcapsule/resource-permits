@@ -55,14 +55,14 @@ func TestReferenceProtectionReadBudget(t *testing.T) {
 				fn = h.OnUpdate(c, c, admission.NewDecoder(c.Scheme()), nil)
 				want = 0
 			}
-			response := fn(t.Context(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Operation: op, Namespace: "team-a", Name: "runner"}})
+			response := fn(t.Context(), admission.Request{Operation: op, Namespace: "team-a", Name: "runner"})
 			if response != nil || c.lists != want || c.unindexed {
 				t.Fatalf("response=%v indexed=%t lists=%d, want %d", response, !c.unindexed, c.lists, want)
 			}
 		})
 	}
 	c := &referenceCountingClient{Client: referenceProtectionFakeClient(t), err: errors.New("reference lookup failed")}
-	response := ReferenceProtection().OnDelete(c, c, admission.NewDecoder(c.Scheme()), nil)(t.Context(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Operation: admissionv1.Delete, Namespace: "team-a", Name: "runner"}})
+	response := ReferenceProtection().OnDelete(c, c, admission.NewDecoder(c.Scheme()), nil)(t.Context(), admission.Request{Operation: admissionv1.Delete, Namespace: "team-a", Name: "runner"})
 	if response == nil || response.Allowed || response.Result == nil || !strings.Contains(response.Result.Message, "reference lookup failed") {
 		t.Fatalf("lookup error became an allow: %v", response)
 	}
@@ -89,7 +89,7 @@ func BenchmarkServiceAccountReferences(b *testing.B) {
 					fn = h.OnUpdate(c, c, admission.NewDecoder(c.Scheme()), nil)
 					op = admissionv1.Update
 				}
-				req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Operation: op, Namespace: "team-a", Name: "runner"}}
+				req := admission.Request{Operation: op, Namespace: "team-a", Name: "runner"}
 				b.ReportAllocs()
 				for b.Loop() {
 					response := fn(b.Context(), req)

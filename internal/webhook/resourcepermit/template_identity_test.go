@@ -43,7 +43,7 @@ func templateIdentityAdmission(tb testing.TB, global bool, operation admissionv1
 	if err != nil {
 		tb.Fatal(err)
 	}
-	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Operation: operation, Object: runtime.RawExtension{Raw: raw}}}
+	req := admission.Request{Operation: operation, Object: runtime.RawExtension{Raw: raw}}
 	decoder := admission.NewDecoder(scheme)
 	// Nil clients ensure validation and skip paths cannot perform API reads.
 	switch operation {

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,7 +62,7 @@ func BenchmarkPermitDeleteAuthorization(b *testing.B) {
 				}).Build()
 				decoder := &test.Decoder[*permitsv1beta2.ResourcePermit]{OldObject: &permitsv1beta2.ResourcePermit{Namespace: "team-0", Status: permitsv1beta2.ResourcePermitStatus{Phase: tt.phase, KeepUntil: tt.keepUntil}}}
 				call := ResourcePermitValidationHandler(logr.Discard()).OnDelete(nil, reader, decoder, nil)
-				req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Namespace: "team-0", UserInfo: authenticationv1.UserInfo{Username: "operator", Groups: []string{"system:masters"}}}}
+				req := admission.Request{Namespace: "team-0", UserInfo: authenticationv1.UserInfo{Username: "operator", Groups: []string{"system:masters"}}}
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {

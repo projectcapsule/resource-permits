@@ -456,7 +456,7 @@ The addon metrics endpoint (`:8080/metrics` by default) exposes the following ga
 
 | Metric | Labels | Meaning |
 | --- | --- | --- |
-| `resource_permits_resourcepermit_phase` | `name`, `target_namespace`, `status` | Value `1` for the permit's current lifecycle phase; `status` contains the phase name |
+| `resource_permits_resourcepermit_phase` | `name`, `target_namespace`, `template`, `template_type`, `requestor`, `status` | Value `1` for the permit's current lifecycle phase; `status` contains the phase name, `template_type` is `namespaced` or `global` |
 | `resource_permits_resourcepermittemplate_condition` | `name`, `target_namespace`, `condition` | Template readiness; `condition="Ready"` is `1` when true and `0` otherwise |
 | `resource_permits_globalresourcepermittemplate_condition` | `name`, `condition` | Global template readiness with the same values |
 
