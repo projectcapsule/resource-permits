@@ -17,6 +17,7 @@ require (
 	github.com/xhit/go-str2duration/v2 v2.2.0
 	go.uber.org/mock v0.6.0
 	gomodules.xyz/jsonpatch/v2 v2.5.0
+	gomodules.xyz/jsonpatch/v3 v3.0.1
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
 	k8s.io/apiserver v0.36.3
