@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build-images:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       security-events: write
