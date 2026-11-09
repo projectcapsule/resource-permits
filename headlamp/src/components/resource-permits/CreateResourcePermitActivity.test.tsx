@@ -202,7 +202,7 @@ describe('ResourcePermit setup', () => {
     ).toBeNull();
   });
 
-  async function submitGeneratedRequest(startTime?: string) {
+  async function submitGeneratedRequest(startTime?: string, prefix = 'incident') {
     render(
       <ResourcePermitSetupForm
         cluster="main"
@@ -217,7 +217,7 @@ describe('ResourcePermit setup', () => {
     ).toBe(true);
     expect((screen.getByLabelText('Reason') as HTMLInputElement).required).toBe(false);
     fireEvent.change(screen.getByLabelText('ResourcePermit name prefix', { exact: false }), {
-      target: { value: 'incident' },
+      target: { value: prefix },
     });
     if (startTime) {
       const startTimeInput = screen.getByLabelText('Start time') as HTMLInputElement;
@@ -232,6 +232,53 @@ describe('ResourcePermit setup', () => {
     const createButton = await screen.findByRole('button', { name: 'Create ResourcePermit' });
     await act(async () => fireEvent.click(createButton));
   }
+
+  it('uses the template name as the generated prefix when the field is empty', async () => {
+    mocks.post.mockResolvedValue({ metadata: { name: 'access-x7j2q', namespace: 'solar-test' } });
+
+    await submitGeneratedRequest(undefined, '');
+
+    expect(screen.queryByText('Required')).toBeNull();
+    expect(mocks.post.mock.calls[0][1].metadata).toEqual({
+      generateName: 'access-',
+      namespace: 'solar-test',
+    });
+  });
+
+  it('uses the template name as the default generated prefix value', () => {
+    render(
+      <ResourcePermitSetupForm
+        cluster="main"
+        namespaces={['solar-test']}
+        templateKind="GlobalResourcePermitTemplate"
+        templateName="access"
+      />
+    );
+
+    const nameField = screen.getByLabelText('ResourcePermit name prefix', {
+      exact: false,
+    }) as HTMLInputElement;
+    expect(nameField.value).toBe('access-');
+    expect(screen.getByText('Kubernetes will append a unique suffix to access-.')).toBeTruthy();
+    expect(nameField.required).toBe(false);
+  });
+
+  it('still requires a name when generated naming is disabled', () => {
+    render(
+      <ResourcePermitSetupForm
+        cluster="main"
+        namespaces={['solar-test']}
+        templateKind="GlobalResourcePermitTemplate"
+        templateName="access"
+      />
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Generate a unique request name' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Template Parameters' }));
+
+    expect(screen.getByText('Required')).toBeTruthy();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
 
   it('creates without a reason and navigates to the generated object, closing only its wizard', async () => {
     mocks.post.mockResolvedValue({ metadata: { name: 'incident-x7j2q', namespace: 'solar-test' } });

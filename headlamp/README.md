@@ -36,8 +36,9 @@ include shareable section links, disabled by default on Desktop.
 
 ### ResourcePermit template catalog metadata
 
-Open **Permits** for Requests and Templates. New requests use a generated
-name prefix by default, accept an optional Reason, and open their detail page
+Open **Permits** for Requests and Templates. New requests use generated naming
+by default, with the name prefix prefilled from the template name (for example
+`access-`), accept an optional Reason, and open their detail page
 immediately after creation. Reviews highlight archive retention or immediate
 deletion after expiry. Denied details retain the future Archiving marker even
 when the controller has not yet reported a deletion date.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCreateResourcePermit,
+  defaultGenerateNamePrefix,
   filterResourcePermitTemplates,
   groupResourcePermitTemplates,
   resourcePermitTemplateCategory,
@@ -8,6 +9,22 @@ import {
 } from './resourcePermitCreate';
 
 describe('ResourcePermit creation', () => {
+  it('uses the template name as a default generated-name prefix', () => {
+    expect(defaultGenerateNamePrefix('access')).toBe('access-');
+  });
+
+  it('sanitizes the template name for a generated-name prefix', () => {
+    expect(defaultGenerateNamePrefix('Access.Admin')).toBe('access-admin-');
+    expect(defaultGenerateNamePrefix('...')).toBe('');
+  });
+
+  it('truncates the default generated-name prefix and trims its hyphen boundaries', () => {
+    const prefix = defaultGenerateNamePrefix(`-${'a'.repeat(238)}-suffix`);
+
+    expect(prefix).toBe(`${'a'.repeat(238)}-`);
+    expect(prefix).not.toMatch(/^-|--$/);
+  });
+
   it('builds a namespaced request without supplying an authenticated requestor', () => {
     const request = buildCreateResourcePermit({
       duration: '1h',

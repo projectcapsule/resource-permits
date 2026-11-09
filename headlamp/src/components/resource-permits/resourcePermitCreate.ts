@@ -77,6 +77,15 @@ export interface CreateResourcePermitInput {
   templateName: string;
 }
 
+export function defaultGenerateNamePrefix(templateName: string): string {
+  const prefix = templateName
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .slice(0, 240)
+    .replace(/^-+|-+$/g, '');
+  return prefix ? `${prefix}-` : '';
+}
+
 export function buildCreateResourcePermit(input: CreateResourcePermitInput) {
   const name = input.name?.trim() || '';
   const generateNameValue = input.generateName?.trim().replace(/-+$/, '') || '';
