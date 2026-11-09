@@ -35,6 +35,11 @@ spec:
       name: Duration
       priority: 10
       type: string
+    - description: Retention deadline after which the expired permit is deleted
+      jsonPath: .status.keepUntil
+      name: KeepUntil
+      priority: 10
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string

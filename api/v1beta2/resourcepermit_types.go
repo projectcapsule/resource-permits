@@ -240,6 +240,7 @@ const (
 // +kubebuilder:printcolumn:name="ActiveFrom",type=string,JSONPath=`.status.active.from`,priority=10
 // +kubebuilder:printcolumn:name="ActiveUntil",type=string,JSONPath=`.status.active.until`,priority=10
 // +kubebuilder:printcolumn:name="Duration",type=string,JSONPath=`.status.request.duration`,priority=10
+// +kubebuilder:printcolumn:name="KeepUntil",type=string,JSONPath=`.status.keepUntil`,priority=10,description="Retention deadline after which the expired permit is deleted"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].message`,priority=10
