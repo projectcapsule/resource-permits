@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "ResourcePermit requests, template catalogs, review and lifecycle management for Headlamp.",
   "engines": {
-    "node": ">=22 <25",
+    "node": ">=22 <27",
     "npm": ">=11"
   },
   "scripts": {
