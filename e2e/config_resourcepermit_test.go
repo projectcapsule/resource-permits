@@ -34,6 +34,7 @@ const (
 	resourcePermitLocalServiceAccount       = "e2e-resourcepermit-local-runner"
 	resourcePermitReadOnlyServiceAccount    = "e2e-resourcepermit-readonly-runner"
 	resourcePermitRetryRequester            = "e2e-resourcepermit-retry-requester"
+	resourcePermitRequesterClusterRole      = "resource-permits-requester"
 )
 
 var _ = Describe(
@@ -41,25 +42,43 @@ var _ = Describe(
 	Ordered,
 	Serial,
 	Label("resource-permit", "config", "impersonation"),
-	func() {
-		var (
-			ctx                     context.Context
-			brt                     *permitsv1beta2.GlobalResourcePermitTemplate
-			namespace               *corev1.Namespace
-			serviceAccountNamespace string
-		)
+	func() { describeGlobalTemplateImpersonation(true) },
+)
 
-		BeforeEach(func() {
-			ctx = context.Background()
-			// Delete target resources before the execution identities they reference.
-			serviceAccountNamespace = createResourcePermitTestNamespace(ctx).Name
-			namespace = createResourcePermitTestNamespace(ctx)
-			brt = &permitsv1beta2.GlobalResourcePermitTemplate{
-				Name: resourcePermitImpersonationTemplateName,
-				Spec: permitsv1beta2.GlobalResourcePermitTemplateSpec{
-					Impersonation: resourcePermitServiceAccountReference(ControllerNamespace, ControllerServiceAccount),
-					Approvals:     resourcepermit.ApprovalSpec{Auto: true},
-					Resources: []apiruntime.ResourceTemplate{{Template: `
+var _ = Describe(
+	"Standalone ResourcePermit impersonation configuration",
+	Ordered,
+	Serial,
+	Label("standalone", "resource-permit", "impersonation"),
+	func() {
+		BeforeEach(expectCapsuleAPIsAbsent)
+		describeGlobalTemplateImpersonation(false)
+	},
+)
+
+// describeGlobalTemplateImpersonation registers the GlobalResourcePermitTemplate
+// impersonation specs. Specs that need a Capsule Tenant are registered only when
+// withTenant is set; the remaining specs use plain namespaces and explicit
+// ServiceAccounts, so they also run without Capsule.
+func describeGlobalTemplateImpersonation(withTenant bool) {
+	var (
+		ctx                     context.Context
+		brt                     *permitsv1beta2.GlobalResourcePermitTemplate
+		namespace               *corev1.Namespace
+		serviceAccountNamespace string
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		// Delete target resources before the execution identities they reference.
+		serviceAccountNamespace = createResourcePermitTestNamespace(ctx).Name
+		namespace = createResourcePermitTestNamespace(ctx)
+		brt = &permitsv1beta2.GlobalResourcePermitTemplate{
+			Name: resourcePermitImpersonationTemplateName,
+			Spec: permitsv1beta2.GlobalResourcePermitTemplateSpec{
+				Impersonation: resourcePermitServiceAccountReference(ControllerNamespace, ControllerServiceAccount),
+				Approvals:     resourcepermit.ApprovalSpec{Auto: true},
+				Resources: []apiruntime.ResourceTemplate{{Template: `
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -68,22 +87,23 @@ metadata:
 data:
   key: value
 `}},
-				},
-			}
-		})
+			},
+		}
+	})
 
-		JustBeforeEach(func() {
-			EventuallyCreation(func() error {
-				brt.ResourceVersion = ""
+	JustBeforeEach(func() {
+		EventuallyCreation(func() error {
+			brt.ResourceVersion = ""
 
-				return k8sClient.Create(ctx, brt)
-			}).Should(Succeed())
-		})
+			return k8sClient.Create(ctx, brt)
+		}).Should(Succeed())
+	})
 
-		JustAfterEach(func() {
-			EventuallyDeletion(brt)
-		})
+	JustAfterEach(func() {
+		EventuallyDeletion(brt)
+	})
 
+	if withTenant {
 		Context("with an explicit template ServiceAccount", func() {
 			BeforeEach(func() {
 				tnt := &capsulev1beta2.Tenant{
@@ -218,30 +238,115 @@ data:
 				}, defaultTimeoutInterval, defaultPollInterval).Should(BeTrue())
 			})
 		})
+	}
 
-		Context("without sufficient target permissions", func() {
-			var requesterClient client.Client
+	Context("without sufficient target permissions", func() {
+		var requesterClient client.Client
 
-			BeforeEach(func() {
-				brt.Spec.Impersonation = resourcePermitServiceAccountReference(
+		BeforeEach(func() {
+			brt.Spec.Impersonation = resourcePermitServiceAccountReference(
+				serviceAccountNamespace,
+				resourcePermitReadOnlyServiceAccount,
+			)
+			grantResourcePermitServiceAccount(
+				serviceAccountNamespace,
+				resourcePermitReadOnlyServiceAccount,
+				namespace.Name,
+				[]string{"get", "list", "watch"},
+			)
+			grantResourcePermitNamespaceAdmin(ctx, namespace.Name, resourcePermitRetryRequester)
+			grantResourcePermitRequesterRole(ctx, namespace.Name, resourcePermitRetryRequester)
+			requesterClient = impersonationClient(
+				resourcePermitRetryRequester,
+				[]string{"system:authenticated"},
+			)
+		})
+
+		It("fails preflight and lets the requester retry after permissions are fixed", func() {
+			br := newImpersonatedResourcePermit(namespace.Name, "e2e-resourcepermit-impersonation-forbidden", brt.Name)
+			DeferCleanup(func() {
+				expireResourcePermitForCleanup(ctx, br)
+				EventuallyDeletion(br)
+			})
+			EventuallyCreation(func() error { return requesterClient.Create(ctx, br) }).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				current := &permitsv1beta2.ResourcePermit{}
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
+				expectResourcePermitServiceAccount(
+					g,
+					current,
 					serviceAccountNamespace,
 					resourcePermitReadOnlyServiceAccount,
 				)
+
+				ready := k8smeta.FindStatusCondition(current.Status.Conditions, apimeta.ReadyCondition)
+				g.Expect(ready).NotTo(BeNil())
+				g.Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(ready.Reason).To(Equal("ResourceDryRunFailed"))
+				g.Expect(ready.Message).To(ContainSubstring("forbidden"))
+				g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseFailed))
+				g.Expect(current.Status.Failure).NotTo(BeNil())
+				g.Expect(current.Status.Failure.Stage).To(Equal(permitsv1beta2.ResourcePermitFailureStagePreflight))
+				g.Expect(current.Status.Failure.RetryPhase).To(Equal(permitsv1beta2.ResourcePermitPhaseApproved))
+				g.Expect(current.Status.ProcessedItems).To(BeEmpty())
+			}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
+
+			cm := resourcePermitManagedConfigMap(br.Namespace)
+			err := k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+			By("granting the missing permissions and retrying as the requester")
+			grantResourcePermitServiceAccount(
+				serviceAccountNamespace,
+				resourcePermitReadOnlyServiceAccount,
+				namespace.Name,
+				[]string{"get", "list", "watch", "create", "update", "patch", "delete"},
+			)
+			patchResourcePermitPhaseAs(
+				ctx,
+				requesterClient,
+				br,
+				permitsv1beta2.ResourcePermitPhaseRetrying,
+			)
+
+			Eventually(func(g Gomega) {
+				current := &permitsv1beta2.ResourcePermit{}
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
+				g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseActive))
+				g.Expect(current.Status.Failure).To(BeNil())
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)).To(Succeed())
+			}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
+
+			By("letting the requester expire the recovered request")
+			patchResourcePermitPhaseAs(
+				ctx,
+				requesterClient,
+				br,
+				permitsv1beta2.ResourcePermitPhaseExpired,
+			)
+			expectResourcePermitAndConfigMapDeleted(ctx, br, cm)
+		})
+
+		Context("when target permissions change after preflight", func() {
+			BeforeEach(func() {
+				// Hold activation until write permissions have been revoked.
+				brt.Spec.Approvals = resourcepermit.ApprovalSpec{
+					Approvers: capsulerbac.UserListSpec{{
+						Kind: capsulerbac.UserOwner,
+						Name: resourcePermitRetryRequester,
+					}},
+				}
 				grantResourcePermitServiceAccount(
 					serviceAccountNamespace,
 					resourcePermitReadOnlyServiceAccount,
 					namespace.Name,
-					[]string{"get", "list", "watch"},
-				)
-				grantResourcePermitNamespaceAdmin(ctx, namespace.Name, resourcePermitRetryRequester)
-				requesterClient = impersonationClient(
-					resourcePermitRetryRequester,
-					[]string{"system:authenticated"},
+					[]string{"get", "list", "watch", "create", "update", "patch", "delete"},
 				)
 			})
 
-			It("fails preflight and lets the requester retry after permissions are fixed", func() {
-				br := newImpersonatedResourcePermit(namespace.Name, "e2e-resourcepermit-impersonation-forbidden", brt.Name)
+			It("enters Failed when write permissions are revoked and recovers on retry", func() {
+				br := newImpersonatedResourcePermit(namespace.Name, "e2e-resourcepermit-activation-retry", brt.Name)
 				DeferCleanup(func() {
 					expireResourcePermitForCleanup(ctx, br)
 					EventuallyDeletion(br)
@@ -251,36 +356,84 @@ data:
 				Eventually(func(g Gomega) {
 					current := &permitsv1beta2.ResourcePermit{}
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
-					expectResourcePermitServiceAccount(
-						g,
-						current,
+					g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseRequested))
+					ready := k8smeta.FindStatusCondition(current.Status.Conditions, apimeta.ReadyCondition)
+					g.Expect(ready).NotTo(BeNil())
+					g.Expect(ready.Status).To(Equal(metav1.ConditionTrue))
+				}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
+
+				By("protecting the resolved ServiceAccount after successful preflight")
+				serviceAccount := &corev1.ServiceAccount{
+					Name:      resourcePermitReadOnlyServiceAccount,
+					Namespace: serviceAccountNamespace,
+				}
+				Eventually(func(g Gomega) {
+					err := k8sClient.Delete(ctx, serviceAccount, client.DryRunAll)
+					g.Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected admission denial, got: %v", err)
+					g.Expect(err).To(MatchError(ContainSubstring(
+						"used by unexpired ResourcePermit " + br.Namespace + "/" + br.Name,
+					)))
+				}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
+
+				setConfigMapWriteAccess := func(allowed bool) {
+					verbs := []string{"get", "list", "watch"}
+					if allowed {
+						verbs = append(verbs, "create", "update", "patch", "delete")
+					}
+					bindServiceAccountToNamespacedResource(
 						serviceAccountNamespace,
 						resourcePermitReadOnlyServiceAccount,
+						namespace.Name,
+						[]string{"configmaps"},
+						verbs,
 					)
+					// Wait for RBAC propagation before approval or retry.
+					Eventually(func(g Gomega) {
+						for _, verb := range []string{"create", "patch"} {
+							review := &authorizationv1.SubjectAccessReview{
+								Spec: authorizationv1.SubjectAccessReviewSpec{
+									User:   serviceAccountUsername(serviceAccountNamespace, resourcePermitReadOnlyServiceAccount),
+									Groups: serviceAccountGroups(serviceAccountNamespace),
+									ResourceAttributes: &authorizationv1.ResourceAttributes{
+										Namespace: namespace.Name,
+										Verb:      verb,
+										Resource:  "configmaps",
+										Name:      resourcePermitImpersonationTargetName,
+									},
+								},
+							}
+							g.Expect(k8sClient.Create(ctx, review)).To(Succeed())
+							g.Expect(review.Status.EvaluationError).To(BeEmpty())
+							g.Expect(review.Status.Allowed).To(Equal(allowed), "%s ConfigMap permission: %+v", verb, review.Status)
+						}
+					}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
+				}
+				// Restore access before permit cleanup, including when an assertion fails.
+				DeferCleanup(setConfigMapWriteAccess, true)
+				By("revoking write permissions and approving the stored snapshot")
+				setConfigMapWriteAccess(false)
+				patchResourcePermitPhaseAs(ctx, requesterClient, br, permitsv1beta2.ResourcePermitPhaseApproved)
 
+				Eventually(func(g Gomega) {
+					current := &permitsv1beta2.ResourcePermit{}
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
+					g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseFailed))
+					g.Expect(current.Status.Failure).NotTo(BeNil())
+					g.Expect(current.Status.Failure.Stage).To(Equal(permitsv1beta2.ResourcePermitFailureStageActivation))
+					g.Expect(current.Status.Failure.RetryPhase).To(Equal(permitsv1beta2.ResourcePermitPhaseApproved))
 					ready := k8smeta.FindStatusCondition(current.Status.Conditions, apimeta.ReadyCondition)
 					g.Expect(ready).NotTo(BeNil())
 					g.Expect(ready.Status).To(Equal(metav1.ConditionFalse))
-					g.Expect(ready.Reason).To(Equal("ResourceDryRunFailed"))
+					g.Expect(ready.Reason).To(Equal("ResourceApplyFailed"))
 					g.Expect(ready.Message).To(ContainSubstring("forbidden"))
-					g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseFailed))
-					g.Expect(current.Status.Failure).NotTo(BeNil())
-					g.Expect(current.Status.Failure.Stage).To(Equal(permitsv1beta2.ResourcePermitFailureStagePreflight))
-					g.Expect(current.Status.Failure.RetryPhase).To(Equal(permitsv1beta2.ResourcePermitPhaseApproved))
-					g.Expect(current.Status.ProcessedItems).To(BeEmpty())
 				}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
 
 				cm := resourcePermitManagedConfigMap(br.Namespace)
 				err := k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
-				Expect(apierrors.IsNotFound(err)).To(BeTrue())
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "failed activation must not create the target: %v", err)
 
-				By("granting the missing permissions and retrying as the requester")
-				grantResourcePermitServiceAccount(
-					serviceAccountNamespace,
-					resourcePermitReadOnlyServiceAccount,
-					namespace.Name,
-					[]string{"get", "list", "watch", "create", "update", "patch", "delete"},
-				)
+				By("restoring write permissions and retrying the stored approved snapshot")
+				setConfigMapWriteAccess(true)
 				patchResourcePermitPhaseAs(
 					ctx,
 					requesterClient,
@@ -291,12 +444,13 @@ data:
 				Eventually(func(g Gomega) {
 					current := &permitsv1beta2.ResourcePermit{}
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
-					g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseActive))
+					g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseActive),
+						"ResourcePermit retry did not activate: failure=%+v, conditions=%+v, resources=%+v",
+						current.Status.Failure, current.Status.Conditions, current.Status.ProcessedItems)
 					g.Expect(current.Status.Failure).To(BeNil())
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)).To(Succeed())
 				}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
 
-				By("letting the requester expire the recovered request")
 				patchResourcePermitPhaseAs(
 					ctx,
 					requesterClient,
@@ -305,172 +459,55 @@ data:
 				)
 				expectResourcePermitAndConfigMapDeleted(ctx, br, cm)
 			})
-
-			Context("when target permissions change after preflight", func() {
-				BeforeEach(func() {
-					// Hold activation until write permissions have been revoked.
-					brt.Spec.Approvals = resourcepermit.ApprovalSpec{
-						Approvers: capsulerbac.UserListSpec{{
-							Kind: capsulerbac.UserOwner,
-							Name: resourcePermitRetryRequester,
-						}},
-					}
-					grantResourcePermitServiceAccount(
-						serviceAccountNamespace,
-						resourcePermitReadOnlyServiceAccount,
-						namespace.Name,
-						[]string{"get", "list", "watch", "create", "update", "patch", "delete"},
-					)
-				})
-
-				It("enters Failed when write permissions are revoked and recovers on retry", func() {
-					br := newImpersonatedResourcePermit(namespace.Name, "e2e-resourcepermit-activation-retry", brt.Name)
-					DeferCleanup(func() {
-						expireResourcePermitForCleanup(ctx, br)
-						EventuallyDeletion(br)
-					})
-					EventuallyCreation(func() error { return requesterClient.Create(ctx, br) }).Should(Succeed())
-
-					Eventually(func(g Gomega) {
-						current := &permitsv1beta2.ResourcePermit{}
-						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
-						g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseRequested))
-						ready := k8smeta.FindStatusCondition(current.Status.Conditions, apimeta.ReadyCondition)
-						g.Expect(ready).NotTo(BeNil())
-						g.Expect(ready.Status).To(Equal(metav1.ConditionTrue))
-					}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
-
-					By("protecting the resolved ServiceAccount after successful preflight")
-					serviceAccount := &corev1.ServiceAccount{
-						Name:      resourcePermitReadOnlyServiceAccount,
-						Namespace: serviceAccountNamespace,
-					}
-					Eventually(func(g Gomega) {
-						err := k8sClient.Delete(ctx, serviceAccount, client.DryRunAll)
-						g.Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected admission denial, got: %v", err)
-						g.Expect(err).To(MatchError(ContainSubstring(
-							"used by unexpired ResourcePermit " + br.Namespace + "/" + br.Name,
-						)))
-					}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
-
-					setConfigMapWriteAccess := func(allowed bool) {
-						verbs := []string{"get", "list", "watch"}
-						if allowed {
-							verbs = append(verbs, "create", "update", "patch", "delete")
-						}
-						bindServiceAccountToNamespacedResource(
-							serviceAccountNamespace,
-							resourcePermitReadOnlyServiceAccount,
-							namespace.Name,
-							[]string{"configmaps"},
-							verbs,
-						)
-						// Wait for RBAC propagation before approval or retry.
-						Eventually(func(g Gomega) {
-							for _, verb := range []string{"create", "patch"} {
-								review := &authorizationv1.SubjectAccessReview{
-									Spec: authorizationv1.SubjectAccessReviewSpec{
-										User:   serviceAccountUsername(serviceAccountNamespace, resourcePermitReadOnlyServiceAccount),
-										Groups: serviceAccountGroups(serviceAccountNamespace),
-										ResourceAttributes: &authorizationv1.ResourceAttributes{
-											Namespace: namespace.Name,
-											Verb:      verb,
-											Resource:  "configmaps",
-											Name:      resourcePermitImpersonationTargetName,
-										},
-									},
-								}
-								g.Expect(k8sClient.Create(ctx, review)).To(Succeed())
-								g.Expect(review.Status.EvaluationError).To(BeEmpty())
-								g.Expect(review.Status.Allowed).To(Equal(allowed), "%s ConfigMap permission: %+v", verb, review.Status)
-							}
-						}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
-					}
-					// Restore access before permit cleanup, including when an assertion fails.
-					DeferCleanup(setConfigMapWriteAccess, true)
-					By("revoking write permissions and approving the stored snapshot")
-					setConfigMapWriteAccess(false)
-					patchResourcePermitPhaseAs(ctx, requesterClient, br, permitsv1beta2.ResourcePermitPhaseApproved)
-
-					Eventually(func(g Gomega) {
-						current := &permitsv1beta2.ResourcePermit{}
-						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
-						g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseFailed))
-						g.Expect(current.Status.Failure).NotTo(BeNil())
-						g.Expect(current.Status.Failure.Stage).To(Equal(permitsv1beta2.ResourcePermitFailureStageActivation))
-						g.Expect(current.Status.Failure.RetryPhase).To(Equal(permitsv1beta2.ResourcePermitPhaseApproved))
-						ready := k8smeta.FindStatusCondition(current.Status.Conditions, apimeta.ReadyCondition)
-						g.Expect(ready).NotTo(BeNil())
-						g.Expect(ready.Status).To(Equal(metav1.ConditionFalse))
-						g.Expect(ready.Reason).To(Equal("ResourceApplyFailed"))
-						g.Expect(ready.Message).To(ContainSubstring("forbidden"))
-					}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
-
-					cm := resourcePermitManagedConfigMap(br.Namespace)
-					err := k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
-					Expect(apierrors.IsNotFound(err)).To(BeTrue(), "failed activation must not create the target: %v", err)
-
-					By("restoring write permissions and retrying the stored approved snapshot")
-					setConfigMapWriteAccess(true)
-					patchResourcePermitPhaseAs(
-						ctx,
-						requesterClient,
-						br,
-						permitsv1beta2.ResourcePermitPhaseRetrying,
-					)
-
-					Eventually(func(g Gomega) {
-						current := &permitsv1beta2.ResourcePermit{}
-						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
-						g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseActive),
-							"ResourcePermit retry did not activate: failure=%+v, conditions=%+v, resources=%+v",
-							current.Status.Failure, current.Status.Conditions, current.Status.ProcessedItems)
-						g.Expect(current.Status.Failure).To(BeNil())
-						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)).To(Succeed())
-					}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
-
-					patchResourcePermitPhaseAs(
-						ctx,
-						requesterClient,
-						br,
-						permitsv1beta2.ResourcePermitPhaseExpired,
-					)
-					expectResourcePermitAndConfigMapDeleted(ctx, br, cm)
-				})
-			})
 		})
-	},
-)
+	})
+}
 
 var _ = Describe(
 	"Namespaced ResourcePermitTemplate impersonation configuration",
 	Ordered,
 	Serial,
 	Label("resource-permit", "config", "impersonation"),
+	describeNamespacedTemplateImpersonation,
+)
+
+var _ = Describe(
+	"Standalone namespaced ResourcePermitTemplate impersonation configuration",
+	Ordered,
+	Serial,
+	Label("standalone", "resource-permit", "impersonation"),
 	func() {
-		var (
-			ctx       context.Context
-			brt       *permitsv1beta2.ResourcePermitTemplate
-			namespace *corev1.Namespace
+		BeforeEach(expectCapsuleAPIsAbsent)
+		describeNamespacedTemplateImpersonation()
+	},
+)
+
+// describeNamespacedTemplateImpersonation registers the namespaced
+// ResourcePermitTemplate impersonation specs. They use plain namespaces only.
+func describeNamespacedTemplateImpersonation() {
+	var (
+		ctx       context.Context
+		brt       *permitsv1beta2.ResourcePermitTemplate
+		namespace *corev1.Namespace
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		namespace = createResourcePermitTestNamespace(ctx)
+
+		grantResourcePermitServiceAccount(
+			namespace.Name,
+			resourcePermitLocalServiceAccount,
+			namespace.Name,
+			[]string{"get", "list", "watch", "create", "update", "patch", "delete"},
 		)
 
-		BeforeEach(func() {
-			ctx = context.Background()
-			namespace = createResourcePermitTestNamespace(ctx)
-
-			grantResourcePermitServiceAccount(
-				namespace.Name,
-				resourcePermitLocalServiceAccount,
-				namespace.Name,
-				[]string{"get", "list", "watch", "create", "update", "patch", "delete"},
-			)
-
-			brt = &permitsv1beta2.ResourcePermitTemplate{
-				Name: "e2e-resourcepermit-local-template", Namespace: namespace.Name,
-				Spec: permitsv1beta2.ResourcePermitTemplateSpec{
-					Impersonation: &apimeta.LocalRFC1123ObjectReference{Name: resourcePermitLocalServiceAccount},
-					Approvals:     resourcepermit.ApprovalSpec{Auto: true},
-					Resources: []apiruntime.ResourceTemplate{{Template: `
+		brt = &permitsv1beta2.ResourcePermitTemplate{
+			Name: "e2e-resourcepermit-local-template", Namespace: namespace.Name,
+			Spec: permitsv1beta2.ResourcePermitTemplateSpec{
+				Impersonation: &apimeta.LocalRFC1123ObjectReference{Name: resourcePermitLocalServiceAccount},
+				Approvals:     resourcepermit.ApprovalSpec{Auto: true},
+				Resources: []apiruntime.ResourceTemplate{{Template: `
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -479,70 +516,69 @@ metadata:
 data:
   source: namespaced-template
 `}},
-				},
-			}
-			EventuallyCreation(func() error { return k8sClient.Create(ctx, brt) }).Should(Succeed())
-			DeferCleanup(func() { EventuallyDeletion(brt) })
+			},
+		}
+		EventuallyCreation(func() error { return k8sClient.Create(ctx, brt) }).Should(Succeed())
+		DeferCleanup(func() { EventuallyDeletion(brt) })
+	})
+
+	It("uses the explicit namespace-local ServiceAccount and records template provenance", func() {
+		br := &permitsv1beta2.ResourcePermit{
+			Name: "e2e-resourcepermit-local", Namespace: namespace.Name,
+			Spec: permitsv1beta2.ResourcePermitSpec{Template: permitsv1beta2.ResourcePermitTemplateReference{
+				Kind: permitsv1beta2.ResourcePermitTemplateKind,
+				Name: brt.Name,
+			}},
+		}
+		DeferCleanup(func() {
+			expireResourcePermitForCleanup(ctx, br)
+			EventuallyDeletion(br)
 		})
+		EventuallyCreation(func() error { return k8sClient.Create(ctx, br) }).Should(Succeed())
 
-		It("uses the explicit namespace-local ServiceAccount and records template provenance", func() {
-			br := &permitsv1beta2.ResourcePermit{
-				Name: "e2e-resourcepermit-local", Namespace: namespace.Name,
-				Spec: permitsv1beta2.ResourcePermitSpec{Template: permitsv1beta2.ResourcePermitTemplateReference{
-					Kind: permitsv1beta2.ResourcePermitTemplateKind,
-					Name: brt.Name,
-				}},
-			}
-			DeferCleanup(func() {
-				expireResourcePermitForCleanup(ctx, br)
-				EventuallyDeletion(br)
-			})
-			EventuallyCreation(func() error { return k8sClient.Create(ctx, br) }).Should(Succeed())
+		cm := resourcePermitManagedConfigMap(br.Namespace)
+		Eventually(func(g Gomega) {
+			current := &permitsv1beta2.ResourcePermit{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
+			expectResourcePermitServiceAccount(
+				g,
+				current,
+				namespace.Name,
+				resourcePermitLocalServiceAccount,
+			)
+			g.Expect(current.Status.Request.Template).NotTo(BeNil())
+			g.Expect(current.Status.Request.Template.Kind).To(Equal(permitsv1beta2.ResourcePermitTemplateKind))
+			g.Expect(current.Status.Request.Template.Name).To(Equal(brt.Name))
+			g.Expect(current.Status.Request.Template.ResourceVersion).NotTo(BeEmpty())
 
-			cm := resourcePermitManagedConfigMap(br.Namespace)
-			Eventually(func(g Gomega) {
-				current := &permitsv1beta2.ResourcePermit{}
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(br), current)).To(Succeed())
-				expectResourcePermitServiceAccount(
-					g,
-					current,
-					namespace.Name,
-					resourcePermitLocalServiceAccount,
-				)
-				g.Expect(current.Status.Request.Template).NotTo(BeNil())
-				g.Expect(current.Status.Request.Template.Kind).To(Equal(permitsv1beta2.ResourcePermitTemplateKind))
-				g.Expect(current.Status.Request.Template.Name).To(Equal(brt.Name))
-				g.Expect(current.Status.Request.Template.ResourceVersion).NotTo(BeEmpty())
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)).To(Succeed())
+			g.Expect(cm.Data).To(HaveKeyWithValue("source", "namespaced-template"))
+			g.Expect(cm.Annotations).To(HaveKeyWithValue(
+				permitmeta.ResourcePermitServiceAccountAnnotation,
+				serviceAccountUsername(namespace.Name, resourcePermitLocalServiceAccount),
+			))
+		}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
 
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)).To(Succeed())
-				g.Expect(cm.Data).To(HaveKeyWithValue("source", "namespaced-template"))
-				g.Expect(cm.Annotations).To(HaveKeyWithValue(
-					permitmeta.ResourcePermitServiceAccountAnnotation,
-					serviceAccountUsername(namespace.Name, resourcePermitLocalServiceAccount),
-				))
-			}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
+		expireActiveResourcePermit(ctx, br)
+		expectResourcePermitAndConfigMapDeleted(ctx, br, cm)
+	})
 
-			expireActiveResourcePermit(ctx, br)
-			expectResourcePermitAndConfigMapDeleted(ctx, br, cm)
-		})
+	It("does not resolve a namespaced template from another namespace", func() {
+		otherNamespace := createResourcePermitTestNamespace(ctx)
 
-		It("does not resolve a namespaced template from another namespace", func() {
-			otherNamespace := createResourcePermitTestNamespace(ctx)
+		br := &permitsv1beta2.ResourcePermit{
+			Name: "e2e-resourcepermit-cross-namespace", Namespace: otherNamespace.Name,
+			Spec: permitsv1beta2.ResourcePermitSpec{Template: permitsv1beta2.ResourcePermitTemplateReference{
+				Kind: permitsv1beta2.ResourcePermitTemplateKind,
+				Name: brt.Name,
+			}},
+		}
 
-			br := &permitsv1beta2.ResourcePermit{
-				Name: "e2e-resourcepermit-cross-namespace", Namespace: otherNamespace.Name,
-				Spec: permitsv1beta2.ResourcePermitSpec{Template: permitsv1beta2.ResourcePermitTemplateReference{
-					Kind: permitsv1beta2.ResourcePermitTemplateKind,
-					Name: brt.Name,
-				}},
-			}
-
-			err := k8sClient.Create(ctx, br)
-			Expect(apierrors.IsForbidden(err)).To(BeTrue())
-			Expect(err).To(MatchError(ContainSubstring("template e2e-resourcepermit-local-template not found")))
-		})
-	},
-)
+		err := k8sClient.Create(ctx, br)
+		Expect(apierrors.IsForbidden(err)).To(BeTrue())
+		Expect(err).To(MatchError(ContainSubstring("template e2e-resourcepermit-local-template not found")))
+	})
+}
 
 func resourcePermitServiceAccountReference(
 	namespace,
@@ -568,6 +604,31 @@ func resourcePermitManagedConfigMap(namespace string) *corev1.ConfigMap {
 		Name:      resourcePermitImpersonationTargetName,
 		Namespace: namespace,
 	}
+}
+
+// grantResourcePermitRequesterRole binds the chart requester ClusterRole in
+// namespace. The chart aggregates it into admin only when configured, as in
+// the Capsule fixture; the standalone install relies on an explicit binding.
+func grantResourcePermitRequesterRole(ctx context.Context, namespace, username string) {
+	roleBinding := &rbacv1.RoleBinding{
+		GenerateName: "e2e-resourcepermit-requester-",
+		Namespace:    namespace,
+		Subjects: []rbacv1.Subject{{
+			APIGroup: rbacv1.GroupName,
+			Kind:     rbacv1.UserKind,
+			Name:     username,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "ClusterRole",
+			Name:     resourcePermitRequesterClusterRole,
+		},
+	}
+
+	Expect(k8sClient.Create(ctx, roleBinding)).To(Succeed())
+	DeferCleanup(func() {
+		EventuallyDeletion(roleBinding)
+	})
 }
 
 func grantResourcePermitServiceAccount(namespace, name, targetNamespace string, configMapVerbs []string) {

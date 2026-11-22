@@ -515,6 +515,7 @@ tasks:
         fi
         export KUBECONFIG
         KUBECONFIG=$(mktemp)
+        echo "KUBECONFIG=$KUBECONFIG"
         cluster_started=false
         cleanup() {
           result=$?

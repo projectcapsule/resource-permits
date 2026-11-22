@@ -23,13 +23,7 @@ import (
 )
 
 var _ = Describe("Standalone Resource Permits", Serial, Label("standalone", "resource-permit"), func() {
-	BeforeEach(func() {
-		By("verifying that no Capsule APIs are installed")
-		err := k8sClient.Get(context.Background(), client.ObjectKey{Name: "default"}, &capsulev1beta2.CapsuleConfiguration{})
-		Expect(k8smeta.IsNoMatchError(err)).To(BeTrue(), "CapsuleConfiguration must not be installed: %v", err)
-		err = k8sClient.List(context.Background(), &capsulev1beta2.TenantList{})
-		Expect(k8smeta.IsNoMatchError(err)).To(BeTrue(), "Tenant must not be installed: %v", err)
-	})
+	BeforeEach(expectCapsuleAPIsAbsent)
 
 	It("executes permits with namespace isolation and protected lifecycle", func() {
 		ctx := context.Background()
@@ -128,3 +122,13 @@ metadata:
 		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Name: "forbidden-target", Namespace: namespace.Name}, &corev1.ConfigMap{}))).To(BeTrue())
 	})
 })
+
+// expectCapsuleAPIsAbsent guards standalone specs against running in a cluster
+// with Capsule installed, where they would not prove standalone behavior.
+func expectCapsuleAPIsAbsent() {
+	By("verifying that no Capsule APIs are installed")
+	err := k8sClient.Get(context.Background(), client.ObjectKey{Name: "default"}, &capsulev1beta2.CapsuleConfiguration{})
+	Expect(k8smeta.IsNoMatchError(err)).To(BeTrue(), "CapsuleConfiguration must not be installed: %v", err)
+	err = k8sClient.List(context.Background(), &capsulev1beta2.TenantList{})
+	Expect(k8smeta.IsNoMatchError(err)).To(BeTrue(), "Tenant must not be installed: %v", err)
+}
