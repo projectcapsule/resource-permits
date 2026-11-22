@@ -611,7 +611,13 @@ var _ = Describe(
 					Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseActive))
 					Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: request.Namespace, Name: "e2e-resourcepermit-delete-active-admin-target"}, &corev1.ConfigMap{})).To(Succeed())
 				}
-				patchLifecyclePhase(ctx, reviewerClient, request, permitsv1beta2.ResourcePermitPhaseExpired)
+				patchLifecyclePhaseFrom(
+					ctx,
+					reviewerClient,
+					request,
+					permitsv1beta2.ResourcePermitPhaseActive,
+					permitsv1beta2.ResourcePermitPhaseExpired,
+				)
 
 				Eventually(func() bool {
 					current := &permitsv1beta2.ResourcePermit{}
@@ -873,10 +879,20 @@ func patchLifecyclePhase(
 	request *permitsv1beta2.ResourcePermit,
 	phase permitsv1beta2.ResourcePermitPhase,
 ) {
+	patchLifecyclePhaseFrom(ctx, actor, request, permitsv1beta2.ResourcePermitPhaseRequested, phase)
+}
+
+func patchLifecyclePhaseFrom(
+	ctx context.Context,
+	actor client.Client,
+	request *permitsv1beta2.ResourcePermit,
+	from permitsv1beta2.ResourcePermitPhase,
+	phase permitsv1beta2.ResourcePermitPhase,
+) {
 	Eventually(func(g Gomega) {
 		current := &permitsv1beta2.ResourcePermit{}
 		g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(request), current)).To(Succeed())
-		g.Expect(current.Status.Phase).To(Equal(permitsv1beta2.ResourcePermitPhaseRequested))
+		g.Expect(current.Status.Phase).To(Equal(from))
 		before := current.DeepCopy()
 		current.Status.Phase = phase
 		g.Expect(actor.Status().Patch(

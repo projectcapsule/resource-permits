@@ -142,7 +142,12 @@ func exerciseMixedProtection(global bool, tenantName, baseNamespace, targetNames
 		denial := Or(ContainSubstring("protected by a ResourcePermit"))
 		if cm.Labels[meta.ReplicationProtectionLabel] == meta.ValueTrue {
 			// Independent validating webhooks have no guaranteed response order.
-			denial = Or(denial, ContainSubstring("capsule replication "+parent.GetName()))
+			// Capsule reports an unavailable parent once the replication is deleted.
+			denial = Or(
+				denial,
+				ContainSubstring("capsule replication "+parent.GetName()),
+				ContainSubstring("protected by a capsule replication; its managing parent is not yet available"),
+			)
 		}
 		Expect(actor.Patch(ctx, cm, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":null,"annotations":null}}`)))).To(MatchError(denial))
 		Expect(actor.Delete(ctx, cm, client.DryRunAll)).To(MatchError(denial))

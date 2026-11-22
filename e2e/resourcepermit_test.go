@@ -137,7 +137,7 @@ var _ = Describe("creating a GlobalResourcePermitTemplate", Ordered, Label("reso
 					StopTrying("protected ConfigMap update unexpectedly succeeded").Now()
 				}
 				g.Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected admission denial, got: %v", err)
-				g.Expect(err).To(MatchError(ContainSubstring("can only be changed by the Capsule controller")))
+				g.Expect(err).To(MatchError(ContainSubstring("protected by a ResourcePermit can only be changed by the Resource Permits controller")))
 			}, defaultTimeoutInterval, defaultPollInterval).Should(Succeed())
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)).To(Succeed())
 			Expect(cm.Data).To(HaveKeyWithValue("key", "value"))
