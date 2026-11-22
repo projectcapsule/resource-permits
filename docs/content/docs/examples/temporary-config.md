@@ -67,7 +67,7 @@ template from a different namespace.
 
 ## Review and observe cleanup
 
-With the [kubectl plugin]({{< relref "/docs/concepts/requests#review-and-control-a-permit" >}})
+With the [kubectl plugin]({{< relref "/docs/reference/cli" >}})
 installed, a member of `platform-on-call` reviews the permit:
 
 ```sh

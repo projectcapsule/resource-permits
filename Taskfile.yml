@@ -149,12 +149,6 @@ tasks:
       - task: docs:install
       - npm --prefix docs run test:browser
 
-  docs:browser:install:
-    desc: Install Chromium and its Linux runtime dependencies for documentation tests.
-    cmds:
-      - task: docs:install
-      - npm --prefix docs exec -- playwright install --with-deps chromium
-
   headlamp:install:
     desc: Install the plugin's locked npm dependencies.
     dir: headlamp

@@ -224,14 +224,10 @@ kubectl get resourcepermit gateway-editor-incident-1042 -n solar-uat \
 
 ## Review and control a permit
 
-Build the kubectl plugin from the Resource Permits source tree and put it on `PATH`:
-
-```bash
-devbox run -- task build
-export PATH="$PWD/bin:$PATH"
-```
-
-The `kubectl-resource_permits` binary is invoked as `kubectl resource-permits`.
+Install the `kubectl-resource_permits` binary from a release archive or build it
+with `task build`, then invoke it as `kubectl resource-permits`. The
+[kubectl plugin reference]({{< relref "/docs/reference/cli" >}}) covers installation,
+cluster connection, and every command and flag.
 Review interactively, or provide a decision directly:
 
 ```bash

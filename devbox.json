@@ -26,7 +26,8 @@
     "lychee": "0.24.2",
     "fluxcd": "2.10.0",
     "kubernetes-helmPlugins.helm-schema": "2.6.1",
-    "zizmor": "1.32.0"
+    "zizmor": "1.32.0",
+    "chromium": "158.0.8127.36"
   },
   "env": {
     "GOTOOLCHAIN": "local",
@@ -38,6 +39,7 @@
   "shell": {
     "init_hook": [
       "export HELM_PLUGINS=\"$DEVBOX_PACKAGES_DIR\"",
+      "export CHROMIUM_EXECUTABLE=\"$DEVBOX_PACKAGES_DIR/bin/chromium\"",
       "export PATH=\"$DEVBOX_PROJECT_ROOT/.devbox/crdoc/$CRDOC_VERSION/bin:$PATH\"",
       "test -x \"$DEVBOX_PROJECT_ROOT/.devbox/crdoc/$CRDOC_VERSION/bin/crdoc\" || GOBIN=\"$DEVBOX_PROJECT_ROOT/.devbox/crdoc/$CRDOC_VERSION/bin\" go install \"fybrik.io/crdoc@$CRDOC_VERSION\""
     ]

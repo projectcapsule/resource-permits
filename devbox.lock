@@ -146,6 +146,42 @@
         }
       }
     },
+    "chromium@158.0.8127.36": {
+      "last_modified": "2026-11-21T08:18:15Z",
+      "resolved": "github:NixOS/nixpkgs/93a9ed0a866099a230ed5146a5bb7d16fd5c9b14#chromium",
+      "source": "devbox-search",
+      "version": "158.0.8127.36",
+      "systems": {
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/cyghid12l9ivb5cmrmdlrd2n61j7gkqq-chromium-158.0.8127.36",
+              "default": true
+            },
+            {
+              "name": "sandbox",
+              "path": "/nix/store/3qwwr1p7jd123j4lbwh8z2s3gzm8k3ql-chromium-158.0.8127.36-sandbox"
+            }
+          ],
+          "store_path": "/nix/store/cyghid12l9ivb5cmrmdlrd2n61j7gkqq-chromium-158.0.8127.36"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/j5jzyirg5xsmiikjy2bpnwhnn2l78dby-chromium-158.0.8127.36",
+              "default": true
+            },
+            {
+              "name": "sandbox",
+              "path": "/nix/store/i21kza8m9zbw9sbp0cnyqw5ydk3apyl4-chromium-158.0.8127.36-sandbox"
+            }
+          ],
+          "store_path": "/nix/store/j5jzyirg5xsmiikjy2bpnwhnn2l78dby-chromium-158.0.8127.36"
+        }
+      }
+    },
     "cocogitto@7.0.0": {
       "last_modified": "2026-10-08T19:21:32Z",
       "resolved": "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30#cocogitto",

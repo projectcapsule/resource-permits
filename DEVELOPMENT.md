@@ -61,10 +61,11 @@ See [playground/README.md](playground/README.md). Examples live under
 
 `task docs:serve` starts Hugo/Doks locally. `task docs:generate` runs the pinned
 upstream crdoc CLI against chart CRDs. `task docs:check` checks drift and builds
-root/subpath sites with offline link checks. `task docs:browser:install
-docs:test:browser` verifies desktop and mobile navigation/search against production
-assets. Permit and shared-concept guides were migrated from the Capsule website, with
-addon API groups, CLI commands, metrics, and Helm settings adapted here.
+root/subpath sites with offline link checks. `task docs:test:browser` verifies desktop
+and mobile navigation/search against production assets using the Devbox `chromium`
+package. Keep it close to the Chromium release targeted by `@playwright/test` in
+`docs/package.json`. Permit and shared-concept guides were migrated from the Capsule
+website, with addon API groups, CLI commands, metrics, and Helm settings adapted here.
 
 `task headlamp:install headlamp:check` uses the existing plugin dependencies and
 lint/format/type/unit/build checks. `task headlamp:package` creates the plugin archive.

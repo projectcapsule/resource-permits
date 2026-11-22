@@ -56,8 +56,9 @@ kubectl wait --for=condition=Ready globalresourcepermittemplate/grafana --timeou
 
 Submit the permit as the tenant requester. A configured approver reviews it with
 `kubectl resource-permits review managed-grafana -n solar-system`. See the
-[review guide]({{< relref "/docs/concepts/requests#review-and-control-a-permit" >}})
-for CLI installation and approval options.
+[kubectl plugin reference]({{< relref "/docs/reference/cli" >}}) for installation
+and the [review guide]({{< relref "/docs/concepts/requests#review-and-control-a-permit" >}})
+for approval options.
 
 ## Expected outcome and cleanup
 
