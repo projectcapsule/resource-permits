@@ -109,3 +109,14 @@ signs:
       - "${artifact}"
       - "--yes"
     artifacts: all
+krews:
+  - name: resource-permits
+    ids:
+      - cli
+    skip_upload: true
+    homepage: https://resource-permits.addons.projectcapsule.dev/docs/
+    description: |
+      Approval workflows and managed resource lifecycles for Kubernetes.
+      Resource Permits helps platform teams offer predefined services and temporary access through reusable templates. Users submit requests, reviewers approve them, and the controller manages the resulting resources for the approved lifetime. Request and review through the Kubernetes API, the kubectl plugin, or Headlamp.
+      Use it with Capsule or on its own, with your existing Kubernetes platform and deployment tools.
+    short_description: Project Capsule ResourcePermit CLI
