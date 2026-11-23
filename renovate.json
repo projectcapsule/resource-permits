@@ -12,6 +12,10 @@
   "semanticCommitType": "feat",
   "ignorePaths": ["docs"],
   "labels": ["renovate"],
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ],
   "devbox": {
     "enabled": true,
     "lockFileMaintenance": {
