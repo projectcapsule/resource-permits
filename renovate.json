@@ -44,6 +44,12 @@
       "enabled": false
     },
     {
+      "description": "SLSA generator workflow only supports semver tags, not digest updates",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["slsa-framework/slsa-github-generator"],
+      "pinDigests": false
+    },
+    {
       "matchManagers": [
         "github-actions",
         "gomod",
